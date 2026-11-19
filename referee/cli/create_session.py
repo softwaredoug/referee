@@ -17,13 +17,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Create a referee evaluation session")
     parser.add_argument("--dataset_name", required=True)
     parser.add_argument("--eval_mode", required=True)
-    parser.add_argument("--training_key_count", type=int, default=1)
+    parser.add_argument("--num_queries", type=int)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--splits", type=float, nargs="+", required=True)
     args = parser.parse_args()
 
     task = CreateSessionTask(
         dataset_name=args.dataset_name,
         eval_mode=args.eval_mode,
-        training_key_count=args.training_key_count,
+        num_queries=args.num_queries,
+        seed=args.seed,
+        splits=tuple(args.splits),
     )
     try:
         controller = CreateSessionController(SessionDB())

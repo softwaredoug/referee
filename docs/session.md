@@ -1,93 +1,106 @@
+# Creating a session and its query splits
+
+A session defines a query pool for a dataset and partitions that pool into one or
+more disjoint splits. Splits have no built-in holdout or training role. The
+orchestrator receives a bearer token for each split and decides how to distribute
+those tokens.
+
 ## Creating a session
 
-In this subsystem, we're creating an evaluation session.
+The creator supplies:
 
-A session contains
-- A holdout key: a secure token that allows access to holdout queries for evaluation
-- One or more training keys: secure tokens that allow access to training queries for model development
+- `dataset_name`: the dataset to use.
+- `eval_mode`: the evaluation mode, currently `ndcg`.
+- `num_queries`: the number of queries to select. If omitted, use all queries in
+  the dataset.
+- `seed`: controls repeatable selection of the overall query pool. It defaults
+  to `42`.
+- `splits`: a required, ordered list of positive proportions that sum to `1`.
+  Each proportion creates one split, in list order.
 
+For example, `--splits 0.6 0.2 0.2` creates three splits; `--splits 0.5 0.5`
+creates two. The ordinal is positional only and does not imply a split role.
 
-## Flow
+The server creates a random per-session `sort_salt`. It selects the overall
+query pool deterministically from stable query identities and the user seed,
+then sorts that pool by a hash of the session salt and query identity. It
+partitions the sorted queries according to the requested proportions. Integer
+split sizes use the largest-remainder rule, with ties assigned to the earlier
+ordinal, so the split sizes always sum to the pool size.
 
-### Create session
+If `num_queries` exceeds the number of queries in the dataset, session creation
+fails. If omitted, the database stores `NULL` and the full query set is used.
 
-An outer orchestrator agent calls this service to create a session. The orchestrator calls with
+### Session table
 
-- A dataset name (a unique string like msmarco, wands, etc)
-- eval mode: ie ndcg, etc (see below for eval modes)
+One row stores the information needed to reproduce the session's overall query
+pool and ordering.
 
-In return, its assigned 
+| session_id | dataset_name | eval_mode | num_queries | user_seed | sort_salt | created_at | last_used_at |
+|------------|--------------|-----------|-------------|-----------|-----------|------------|--------------|
+| 1          | msmarco      | ndcg      | 1000        | 42        | …         | 2024-01-01 | NULL         |
 
-- A secure holdout token: intended to be used in future eval calls by orchestrator to access
-  holdout queries to run.
-- One or more training tokens: intended to give access to a subset of queries for training purposes
+`sort_salt` is generated independently for each session and is only used by the
+service. No global allocation key is required.
 
-### Session keys table
+### Session splits table
 
-A session keys table defines the sessions that exist, one row per key (holdout vs training).
+Each row associates a bearer token with one split of a session.
 
-| session_key_id | key_type | key_value | dataset_name | eval_mode | created_at | last_used_at | parent_key |
-|----------------|----------|-----------|--------------|-----------|------------| -------------|-----------|
-| 1              | holdout  | abc123    | msmarco      | ndcg      | 2024-01-01 | 2025-01-01   | NULL       |
-| 2              | training | def456    | msmarco      | ndcg      | 2024-01-01 | 2025-01-01   | 1          |
+| session_split_id | bearer_token | session_id | proportion | ordinal | created_at | last_used_at |
+|------------------|--------------|------------|------------|---------|------------|--------------|
+| 1                | abc123       | 1          | 0.6        | 1       | 2024-01-01 | NULL         |
+| 2                | def456       | 1          | 0.2        | 2       | 2024-01-01 | NULL         |
+| 3                | hij456       | 1          | 0.2        | 3       | 2024-01-01 | NULL         |
 
-Notice the schema
+The token identifies the split. `ordinal` determines the split's position in the
+sorted query pool; proportions across a session must sum to `1`.
 
-- session_key_id holds an auto-incremnting primary key for the table
-- key_type is either holdout or training
-- key_value is a secure token that is used to access the queries from the client and 
-  to salt the random process that separates training and holdout queries
-- dataset_name: the name of the dataset for which this session is created
-- eval_mode: the evaluation mode for this session (e.g., ndcg)
-- created_at: timestamp of when the session key was created
-- last_used_at: timestamp of when the session key was last used
-- parent_key: for training keys, this points to the holdout key that it is associated with. For holdout keys, this is NULL.
+Session and split rows are inserted atomically. The creator receives tokens in
+ordinal order:
 
-
-### REST API creation
-
-Creating a session key is done through the following REST call:
-
+```json
+{
+  "split_tokens": ["abc123", "def456", "hij456"]
+}
 ```
-POST /api/v1/sessions
+
+## CLI
+
+```sh
+uv run create-session \
+  --dataset_name msmarco \
+  --eval_mode ndcg \
+  --num_queries 1000 \
+  --seed 42 \
+  --splits 0.6 0.2 0.2
+```
+
+`--splits` is mandatory. The output is JSON with `split_tokens` in the same
+order as the supplied proportions.
+
+## REST API shape
+
+The corresponding creation request is:
+
+```json
 {
   "dataset_name": "msmarco",
-  "eval_mode": "ndcg"
+  "eval_mode": "ndcg",
+  "num_queries": 1000,
+  "seed": 42,
+  "splits": [0.6, 0.2, 0.2]
 }
 ```
 
-And response is:
+It returns the same `split_tokens` response as the CLI. A REST API is not yet
+implemented.
 
-```
-{
-  "holdout_key": "abc123",
-  "training_keys": ["def456"]
-}
-```
+## Security scope
 
-### CLI creation
-
-The same process can be performed through the CLI:
-
-```bash
-uv run create-session --dataset_name msmarco --eval_mode ndcg
-```
-
-Which returns the same JSON as above.
-
-
-### Session keys as hashes / salts
-
-The session keys act as a hash into a random process that separates training and holdout queries. 
-
-The keys are generated in a way that they are unique and secure, ensuring that the training and holdout
-datasets remain distinct and protected.
-
-
-## Allowed datasets
-
-Currently allow `msmarco`, `esci`, and `doug_blog` datasets.
-
-## Eval modes
-
-Currently NDCG as defined in the cheat-at-search library
+The orchestrator keeps tokens it does not intend to distribute and gives each
+subagent only the token for its assigned split. Tokens are independent random
+bearer credentials; they do not encode split ordinals or proportions. The
+session salt is stored server-side to make the ordering difficult to predict
+from the public seed alone. This design assumes subagents access splits through
+the service rather than directly reading the database.

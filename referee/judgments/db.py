@@ -90,25 +90,26 @@ class JudgmentsDB:
 
                     cursor.execute(
                         """
-                        SELECT source_query_id
+                        SELECT source_query_id, split
                         FROM judgment_stage
-                        GROUP BY source_query_id
-                        HAVING COUNT(DISTINCT (split, keywords, metadata)) > 1
+                        GROUP BY source_query_id, split
+                        HAVING COUNT(DISTINCT (keywords, metadata)) > 1
                         LIMIT 1
                         """
                     )
                     conflicting_query = cursor.fetchone()
                     if conflicting_query is not None:
                         raise ValueError(
-                            "Conflicting query text, split, or metadata for source "
-                            f"query id {conflicting_query[0]}"
+                            "Conflicting query text or metadata for source "
+                            f"query id {conflicting_query[0]} in split "
+                            f"{conflicting_query[1]}"
                         )
 
                     cursor.execute(
                         """
-                        SELECT source_query_id, doc_id
+                        SELECT source_query_id, split, doc_id
                         FROM judgment_stage
-                        GROUP BY source_query_id, doc_id
+                        GROUP BY source_query_id, split, doc_id
                         HAVING COUNT(DISTINCT grade) > 1
                         LIMIT 1
                         """
@@ -117,7 +118,8 @@ class JudgmentsDB:
                     if conflicting_grade is not None:
                         raise ValueError(
                             "Conflicting grades for source query/document pair "
-                            f"({conflicting_grade[0]}, {conflicting_grade[1]})"
+                            f"({conflicting_grade[0]}, {conflicting_grade[1]}, "
+                            f"{conflicting_grade[2]})"
                         )
 
                     cursor.execute(
@@ -141,6 +143,7 @@ class JudgmentsDB:
                         JOIN queries AS q
                           ON q.dataset_id = %s
                          AND q.source_query_id = stage.source_query_id
+                         AND q.split IS NOT DISTINCT FROM stage.split
                         ON CONFLICT (query_id, doc_id) DO NOTHING
                         """,
                         (dataset_id,),

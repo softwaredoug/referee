@@ -13,11 +13,12 @@ cp .env.example .env
 make db-bootstrap
 ```
 
-`make db-bootstrap` starts PostgreSQL, applies the schema, and loads the
-judgment datasets. Run it against a fresh database; the initial schema script
-is not a migration and is applied only once. The PostgreSQL service is available
-on `localhost:5432`. The development connection string is in `.env` as
-`DATABASE_URL`. Its credentials are for local development only.
+`make db-bootstrap` starts PostgreSQL, asks for confirmation, drops and
+recreates the database named in `DATABASE_URL`, applies the schema, and loads
+the judgment datasets. **All existing data in that database will be deleted.**
+The PostgreSQL service is available on `localhost:5432`. The development
+connection string is in `.env` as `DATABASE_URL`. Its credentials are for local
+development only.
 
 To reload the datasets after the schema is applied, run
 `uv run --group judgments-loader --env-file .env load-judgments`. See

@@ -33,7 +33,8 @@ queries have a locale used to identify the language of the query.
 
 - keywords - the search query string
 - metadata - any additional metadata associated with the query, stored as a JSON object. This can include information like locale, user preferences, or other relevant details.
-- source_query_id - any query identifier provided from the source dataset
+- source_query_id - any query identifier provided from the source dataset; source
+  IDs may repeat across splits, so query identity includes `split`
 - split the name of the split given by the source dataset, if available
 
 

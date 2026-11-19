@@ -31,7 +31,7 @@ CREATE TABLE queries (
     dataset_id BIGINT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
     keywords TEXT NOT NULL,
     metadata JSONB,
-    UNIQUE (dataset_id, source_query_id)
+    UNIQUE NULLS NOT DISTINCT (dataset_id, source_query_id, split)
 );
 
 CREATE INDEX queries_dataset_split_idx ON queries(dataset_id, split);

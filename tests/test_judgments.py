@@ -164,12 +164,36 @@ def test_bulk_load_normalizes_queries_and_replaces_dataset() -> None:
     first_records = [
         JudgmentRecord("q-1", "train", "pasta", {"locale": "en-US"}, "p-1", 3),
         JudgmentRecord("q-1", "train", "pasta", {"locale": "en-US"}, "p-2", 1),
+        JudgmentRecord("q-1", "test", "pasta", {"locale": "en-US"}, "p-1", 0),
         JudgmentRecord("q-2", "test", "bread", {"locale": "en-GB"}, "p-3", 2),
     ]
 
     try:
         first_result = database.replace_dataset(definition, first_records, batch_size=2)
-        assert (first_result.query_count, first_result.judgment_count) == (2, 3)
+        assert (first_result.query_count, first_result.judgment_count) == (3, 4)
+
+        with closing(psycopg2.connect(database_url)) as connection:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT q.source_query_id, q.split, count(j.judgment_id)
+                        FROM datasets AS d
+                        JOIN queries AS q USING (dataset_id)
+                        JOIN judgments AS j USING (query_id)
+                        WHERE d.dataset_name = %s
+                        GROUP BY q.source_query_id, q.split
+                        ORDER BY q.source_query_id, q.split
+                        """,
+                        (dataset_name,),
+                    )
+                    split_rows = cursor.fetchall()
+
+        assert split_rows == [
+            ("q-1", "test", 1),
+            ("q-1", "train", 2),
+            ("q-2", "test", 1),
+        ]
 
         replacement_records = [
             JudgmentRecord("q-3", "test", "soup", {"locale": "en-US"}, "p-4", 0)

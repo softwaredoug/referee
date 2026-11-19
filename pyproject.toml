@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "A referee service for search retrieval autoresearch tasks"
 readme = "README.md"
 requires-python = ">=3.15"
-dependencies = []
+dependencies = [
+    "psycopg2-binary>=2.9.10",
+]
+
+[project.scripts]
+create-session = "referee.cli.create_session:main"
 
 [dependency-groups]
 dev = [

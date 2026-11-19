@@ -17,12 +17,24 @@ The PostgreSQL service is available on `localhost:5432`. The development
 connection string is in `.env` as `DATABASE_URL`. Its credentials are for local
 development only.
 
+Apply the database schema once to a fresh database with:
+
+```sh
+psql "$DATABASE_URL" -f database/0001_initial_schema.sql
+```
+
+Run that command from a shell where `DATABASE_URL` is set (for example, after
+`set -a; . .env; set +a`).
+
+Load the prebuilt judgment datasets with `uv sync --group judgments-loader`
+followed by `uv run load-judgments`. See `docs/judgments.md` for details.
+
 Run the configured quality checks with:
 
 ```sh
 uv run flake8 referee tests
 uv run pyright
-uv run --env-file .env pytest
+uv run --group judgments-loader --env-file .env pytest
 ```
 
 Install the pre-commit hooks in this checkout with:

@@ -15,7 +15,7 @@ repos:
         always_run: true
       - id: pytest
         name: pytest (Docker PostgreSQL required)
-        entry: uv run --env-file .env pytest
+        entry: uv run --group judgments-loader --env-file .env pytest
         language: system
         pass_filenames: false
         always_run: true

@@ -10,6 +10,7 @@ dependencies = [
 
 [project.scripts]
 create-session = "referee.cli.create_session:main"
+load-judgments = "referee.cli.load_judgments:main"
 
 [dependency-groups]
 dev = [
@@ -18,6 +19,10 @@ dev = [
     "pyright>=1.1.400",
     "pytest>=8.3.5",
 ]
+judgments-loader = [
+    "cheat-at-search @ git+https://github.com/softwaredoug/cheat-at-search.git@f19c688654c5ebba8bd63b468fc02afd3d2c2be2",
+    "searcharray>=0.0.73,<0.0.74",
+]
 
 [build-system]
 requires = ["hatchling>=1.27.0"]
@@ -25,6 +30,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["referee"]
+
+[tool.uv.sources]
+searcharray = { git = "https://github.com/softwaredoug/searcharray.git", rev = "5ead0c721128d506264be33d9445e9a8508c5f98" }
 
 [tool.pyright]
 include = ["referee"]

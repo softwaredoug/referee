@@ -1,0 +1,29 @@
+[project]
+name = "referee"
+version = "0.1.0"
+description = "A referee service for search retrieval autoresearch tasks"
+readme = "README.md"
+requires-python = ">=3.15"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "flake8>=7.2.0",
+    "pyright>=1.1.400",
+    "pytest>=8.3.5",
+]
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["referee"]
+
+[tool.pyright]
+include = ["referee"]
+pythonVersion = "3.15"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

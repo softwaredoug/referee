@@ -1,6 +1,5 @@
 """Behavioral coverage for session creation and query allocation."""
 
-import json
 import os
 import sys
 from contextlib import closing
@@ -85,42 +84,25 @@ def test_query_allocation_is_repeatable_and_disjoint() -> None:
 
 
 @pytest.mark.parametrize("dataset_name", ["msmarco", "doug_blog"])
-def test_cli_creates_and_persists_session_splits(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    dataset_name: str,
-) -> None:
+def test_controller_creates_and_persists_session_splits(dataset_name: str) -> None:
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
         pytest.fail("TEST_DATABASE_URL is required for the PostgreSQL session tests")
 
-    monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "create-session",
-            "--dataset_name",
-            dataset_name,
-            "--eval_mode",
-            "ndcg",
-            "--num_queries",
-            "10",
-            "--seed",
-            "42",
-            "--splits",
-            "0.6",
-            "0.2",
-            "0.2",
-        ],
+    controller = CreateSessionController(SessionDB(database_url))
+    result = controller.create_session(
+        CreateSessionTask(
+            dataset_name=dataset_name,
+            eval_mode="ndcg",
+            num_queries=10,
+            seed=42,
+            splits=(0.6, 0.2, 0.2),
+        )
     )
-    main()
-    result_data = json.loads(capsys.readouterr().out)
-    split_tokens = result_data["split_tokens"]
+    split_tokens = result.split_tokens
     session_id: int | None = None
 
     try:
-        assert set(result_data) == {"split_tokens"}
         assert len(split_tokens) == 3
         with closing(psycopg2.connect(database_url)) as connection:
             with connection:
@@ -147,6 +129,81 @@ def test_cli_creates_and_persists_session_splits(
         assert [row[6] for row in rows] == split_tokens
         assert [row[7] for row in rows] == pytest.approx([0.6, 0.2, 0.2])
         assert [row[8] for row in rows] == [1, 2, 3]
+    finally:
+        if session_id is not None:
+            with closing(psycopg2.connect(database_url)) as connection:
+                with connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "DELETE FROM sessions WHERE session_id = %s",
+                            (session_id,),
+                        )
+
+
+def test_controller_defaults_to_full_query_set_and_seed_42() -> None:
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.fail("TEST_DATABASE_URL is required for the PostgreSQL session tests")
+
+    dataset_name = "doug_blog"
+    controller = CreateSessionController(SessionDB(database_url))
+    result = controller.create_session(
+        CreateSessionTask(
+            dataset_name=dataset_name,
+            eval_mode="ndcg",
+            splits=(0.5, 0.5),
+        )
+    )
+    split_tokens = result.split_tokens
+    session_id: int | None = None
+
+    try:
+        with closing(psycopg2.connect(database_url)) as connection:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT s.session_id, s.num_queries, s.user_seed,
+                               s.sort_salt, sp.proportion, sp.ordinal
+                        FROM sessions AS s
+                        JOIN session_splits AS sp USING (session_id)
+                        WHERE sp.bearer_token = ANY(%s)
+                        ORDER BY sp.ordinal
+                        """,
+                        (split_tokens,),
+                    )
+                    session_rows = cursor.fetchall()
+                    cursor.execute(
+                        """
+                        SELECT q.source_query_id, q.split
+                        FROM queries AS q
+                        JOIN datasets AS d USING (dataset_id)
+                        WHERE d.dataset_name = %s
+                        """,
+                        (dataset_name,),
+                    )
+                    query_ids = cursor.fetchall()
+
+        assert len(session_rows) == 2
+        session_id = session_rows[0][0]
+        assert all(row[0] == session_id for row in session_rows)
+        assert all(row[1] is None for row in session_rows)
+        assert all(row[2] == 42 for row in session_rows)
+        assert [row[4] for row in session_rows] == pytest.approx([0.5, 0.5])
+        assert [row[5] for row in session_rows] == [1, 2]
+
+        query_splits = allocate_query_splits(
+            query_ids,
+            num_queries=session_rows[0][1],
+            seed=session_rows[0][2],
+            sort_salt=session_rows[0][3],
+            proportions=(0.5, 0.5),
+        )
+        assigned_query_ids = {
+            query_id for query_split in query_splits for query_id in query_split
+        }
+        assert assigned_query_ids == set(query_ids)
+        assert sum(len(query_split) for query_split in query_splits) == len(query_ids)
     finally:
         if session_id is not None:
             with closing(psycopg2.connect(database_url)) as connection:

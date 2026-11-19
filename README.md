@@ -32,6 +32,9 @@ uv run pyright
 uv run --group judgments-loader --env-file .env pytest
 ```
 
+See [`docs/testing.md`](docs/testing.md) for the test approach, database setup,
+and controller e2e test pattern.
+
 Install the pre-commit hooks in this checkout with:
 
 ```sh

@@ -10,24 +10,18 @@ management.
 ```sh
 uv sync
 cp .env.example .env
-docker compose up -d --wait
+make db-bootstrap
 ```
 
-The PostgreSQL service is available on `localhost:5432`. The development
-connection string is in `.env` as `DATABASE_URL`. Its credentials are for local
-development only.
+`make db-bootstrap` starts PostgreSQL, applies the schema, and loads the
+judgment datasets. Run it against a fresh database; the initial schema script
+is not a migration and is applied only once. The PostgreSQL service is available
+on `localhost:5432`. The development connection string is in `.env` as
+`DATABASE_URL`. Its credentials are for local development only.
 
-Apply the database schema once to a fresh database with:
-
-```sh
-psql "$DATABASE_URL" -f database/0001_initial_schema.sql
-```
-
-Run that command from a shell where `DATABASE_URL` is set (for example, after
-`set -a; . .env; set +a`).
-
-Load the prebuilt judgment datasets with `uv sync --group judgments-loader`
-followed by `uv run load-judgments`. See `docs/judgments.md` for details.
+To reload the datasets after the schema is applied, run
+`uv run --group judgments-loader --env-file .env load-judgments`. See
+`docs/judgments.md` for details.
 
 Run the configured quality checks with:
 

@@ -5,7 +5,7 @@ import secrets
 
 from referee.session.db import SessionDB
 
-ALLOWED_DATASETS = frozenset({"msmarco", "esci"})
+ALLOWED_DATASETS = frozenset({"msmarco", "esci", "doug_blog"})
 ALLOWED_EVAL_MODES = frozenset({"ndcg"})
 
 

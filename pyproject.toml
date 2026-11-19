@@ -20,8 +20,7 @@ dev = [
     "pytest>=8.3.5",
 ]
 judgments-loader = [
-    "cheat-at-search @ git+https://github.com/softwaredoug/cheat-at-search.git@f19c688654c5ebba8bd63b468fc02afd3d2c2be2",
-    "searcharray>=0.0.73,<0.0.74",
+    "cheat-at-search @ git+https://github.com/softwaredoug/cheat-at-search.git@f1ff0cc06cc0ecd0feff2da7a1bf087daf3faede",
 ]
 
 [build-system]
@@ -30,9 +29,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["referee"]
-
-[tool.uv.sources]
-searcharray = { git = "https://github.com/softwaredoug/searcharray.git", rev = "5ead0c721128d506264be33d9445e9a8508c5f98" }
 
 [tool.pyright]
 include = ["referee"]

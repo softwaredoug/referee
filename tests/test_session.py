@@ -44,11 +44,13 @@ def test_create_session_rejects_invalid_input(
     ("training_key_args", "expected_training_keys"),
     [([], 1), (["--training_key_count", "2"], 2)],
 )
+@pytest.mark.parametrize("dataset_name", ["msmarco", "doug_blog"])
 def test_cli_creates_and_persists_holdout_and_training_keys(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     training_key_args: list[str],
     expected_training_keys: int,
+    dataset_name: str,
 ) -> None:
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
@@ -61,7 +63,7 @@ def test_cli_creates_and_persists_holdout_and_training_keys(
         [
             "create-session",
             "--dataset_name",
-            "msmarco",
+            dataset_name,
             "--eval_mode",
             "ndcg",
             *training_key_args,
@@ -95,7 +97,7 @@ def test_cli_creates_and_persists_holdout_and_training_keys(
                     training_rows = [row for row in rows if row[1] == "training"]
                     assert len(holdout_rows) == 1
                     assert len(training_rows) == expected_training_keys
-                    assert all(row[2:4] == ("msmarco", "ndcg") for row in rows)
+                    assert all(row[2:4] == (dataset_name, "ndcg") for row in rows)
                     assert all(row[4] == holdout_rows[0][0] for row in training_rows)
                     assert holdout_rows[0][4] is None
     finally:

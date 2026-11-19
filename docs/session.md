@@ -86,7 +86,7 @@ datasets remain distinct and protected.
 
 ## Allowed datasets
 
-Currently allow msmarco and esci datasets
+Currently allow `msmarco`, `esci`, and `doug_blog` datasets.
 
 ## Eval modes
 

@@ -52,7 +52,7 @@ def test_cli_creates_and_persists_holdout_and_training_keys(
 ) -> None:
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
-        pytest.skip("Set TEST_DATABASE_URL to run the PostgreSQL session test")
+        pytest.fail("TEST_DATABASE_URL is required for the PostgreSQL session tests")
 
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setattr(

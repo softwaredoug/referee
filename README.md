@@ -20,19 +20,21 @@ development only.
 Run the configured quality checks with:
 
 ```sh
-uv run flake8 referee
+uv run flake8 referee tests
 uv run pyright
+uv run --env-file .env pytest
 ```
 
-Install the post-commit checks in this checkout with:
+Install the pre-commit hooks in this checkout with:
 
 ```sh
-cp .githooks/post-commit .git/hooks/post-commit
-chmod +x .git/hooks/post-commit
+uv run pre-commit install
 ```
 
-The hook runs flake8, pyright, and pytest after each commit. Set `TEST_DATABASE_URL`
-to run the PostgreSQL-backed session tests; otherwise those tests are skipped.
+The hooks run flake8, pyright, and pytest before every commit. The tests require
+`TEST_DATABASE_URL`; `.env.example` points it at the local Docker PostgreSQL service.
+If the database is unavailable or the schema has not been applied, the commit is
+blocked by the failing test hook.
 
 Pytest is included for behavioral tests, which will live under `tests/` as the
 service features are implemented.

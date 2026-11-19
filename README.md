@@ -24,6 +24,16 @@ uv run flake8 referee
 uv run pyright
 ```
 
+Install the post-commit checks in this checkout with:
+
+```sh
+cp .githooks/post-commit .git/hooks/post-commit
+chmod +x .git/hooks/post-commit
+```
+
+The hook runs flake8, pyright, and pytest after each commit. Set `TEST_DATABASE_URL`
+to run the PostgreSQL-backed session tests; otherwise those tests are skipped.
+
 Pytest is included for behavioral tests, which will live under `tests/` as the
 service features are implemented.
 

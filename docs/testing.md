@@ -51,6 +51,17 @@ To run just the session tests:
 uv run --env-file .env pytest tests/test_session.py
 ```
 
+To run the 100-query ESCI latency benchmark and print its timings:
+
+```sh
+uv run --env-file .env benchmark-esci-eval
+uv run --env-file .env pytest -s tests/test_eval_benchmark.py
+```
+
+The benchmark creates and cleans up a temporary session/task, shuffles the
+judged documents into a temporary CSV, and reports task-creation and completion
+controller latency. Pass `--results_csv path/to/results.csv` to keep the CSV.
+
 The PostgreSQL tests require the database to be available and bootstrapped; they
 create and clean up their test records. The judgment-loader dependency group is
 needed for the full test suite because it includes a real small-dataset loading

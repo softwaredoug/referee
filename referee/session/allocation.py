@@ -3,7 +3,8 @@
 import hashlib
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from time import perf_counter
 
 QueryIdentity = tuple[str, str | None]
 
@@ -59,6 +60,7 @@ def allocate_query_splits(
     seed: int,
     sort_salt: str,
     proportions: Sequence[float],
+    timing_probe: Callable[[str, float], None] | None = None,
 ) -> list[list[QueryIdentity]]:
     """Select a seeded query pool, salt-sort it, and return ordinal splits.
 
@@ -92,22 +94,30 @@ def allocate_query_splits(
         ).encode("utf-8")
         return hashlib.sha256(payload).digest()
 
+    sample_started = perf_counter() if timing_probe is not None else 0.0
     pool = sorted(
         query_ids,
         key=lambda identity: (sample_rank(identity), identity_bytes(identity)),
     )
     if num_queries is not None:
         pool = pool[:num_queries]
+    if timing_probe is not None:
+        timing_probe("allocation.sample_pool", perf_counter() - sample_started)
 
     salt_bytes = sort_salt.encode("utf-8")
 
     def split_rank(identity: QueryIdentity) -> bytes:
         return hashlib.sha256(salt_bytes + b"\0" + identity_bytes(identity)).digest()
 
+    salt_sort_started = perf_counter() if timing_probe is not None else 0.0
     ordered_pool = sorted(
         pool,
         key=lambda identity: (split_rank(identity), identity_bytes(identity)),
     )
+    if timing_probe is not None:
+        timing_probe("allocation.salt_sort", perf_counter() - salt_sort_started)
+
+    partition_started = perf_counter() if timing_probe is not None else 0.0
     sizes = split_sizes(len(ordered_pool), normalized)
 
     splits: list[list[QueryIdentity]] = []
@@ -115,4 +125,6 @@ def allocate_query_splits(
     for size in sizes:
         splits.append(ordered_pool[start:start + size])
         start += size
+    if timing_probe is not None:
+        timing_probe("allocation.partition", perf_counter() - partition_started)
     return splits

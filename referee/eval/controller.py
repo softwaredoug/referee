@@ -18,6 +18,7 @@ from referee.eval.models import (
     SubmittedResult,
     TaskDescriptor,
 )
+from referee.eval.timing import TimingProbe, timed
 from referee.session.allocation import allocate_query_splits
 
 ALLOWED_EVAL_MODES = frozenset({"ndcg", "mrr"})
@@ -26,24 +27,30 @@ ALLOWED_EVAL_MODES = frozenset({"ndcg", "mrr"})
 class EvalController:
     """Create tasks from session splits and evaluate their submitted results."""
 
-    def __init__(self, eval_db: EvalDB) -> None:
+    def __init__(
+        self, eval_db: EvalDB, *, timing_probe: TimingProbe | None = None
+    ) -> None:
         self._eval_db = eval_db
+        self._timing_probe = timing_probe
 
     def create_task(self, task: CreateTaskTask) -> CreateTaskResult:
         """Create a distinct task containing all queries in the token's split."""
         if not task.bearer_token:
             raise ValueError("bearer_token must not be empty")
 
-        session = self._eval_db.get_session_context(task.bearer_token)
+        with timed(self._timing_probe, "controller.create.load_session"):
+            session = self._eval_db.get_session_context(task.bearer_token)
         if session.eval_mode not in ALLOWED_EVAL_MODES:
             raise ValueError(f"Unsupported session eval_mode: {session.eval_mode}")
 
-        selected_queries = self._selected_queries(session)
+        with timed(self._timing_probe, "controller.create.allocate_queries"):
+            selected_queries = self._selected_queries(session)
         if not selected_queries:
             raise ValueError("The session split contains no queries")
 
         task_id = secrets.token_urlsafe(24)
-        self._eval_db.create_task(task.bearer_token, task_id)
+        with timed(self._timing_probe, "controller.create.persist_task"):
+            self._eval_db.create_task(task.bearer_token, task_id)
         return CreateTaskResult(
             dataset_name=session.dataset_name,
             task=TaskDescriptor(id=task_id, eval_mode=session.eval_mode),
@@ -64,41 +71,47 @@ class EvalController:
         if not task.task_id:
             raise ValueError("task_id must not be empty")
 
-        context = self._eval_db.get_task_context(task.task_id, task.bearer_token)
+        with timed(self._timing_probe, "controller.complete.load_task"):
+            context = self._eval_db.get_task_context(task.task_id, task.bearer_token)
         if context.complete:
             raise ValueError("Task is already complete")
 
         session = context.session
         if session.eval_mode not in ALLOWED_EVAL_MODES:
             raise ValueError(f"Unsupported session eval_mode: {session.eval_mode}")
-        selected_queries = self._selected_queries(session)
+        with timed(self._timing_probe, "controller.complete.allocate_queries"):
+            selected_queries = self._selected_queries(session)
         if not selected_queries:
             raise ValueError("The session split contains no queries")
 
-        grouped_results = self._validate_results(task.results, selected_queries)
+        with timed(self._timing_probe, "controller.complete.validate_results"):
+            grouped_results = self._validate_results(task.results, selected_queries)
         query_ids = [query.query_id for query in selected_queries]
-        judgments = self._eval_db.get_judgments(query_ids)
+        with timed(self._timing_probe, "controller.complete.load_judgments"):
+            judgments = self._eval_db.get_judgments(query_ids)
 
         query_metrics: list[QueryMetric] = []
-        for query in selected_queries:
-            ranked_doc_ids = grouped_results[query.query_id]
-            query_judgments = judgments[query.query_id]
-            if session.eval_mode == "ndcg":
-                score = ndcg_at_10(ranked_doc_ids, query_judgments)
-            else:
-                score = mrr_at_10(ranked_doc_ids, query_judgments)
-            query_metrics.append(
-                QueryMetric(
-                    query_id=str(query.query_id),
-                    query_text=query.query_text,
-                    score=score,
+        with timed(self._timing_probe, "controller.complete.calculate_metrics"):
+            for query in selected_queries:
+                ranked_doc_ids = grouped_results[query.query_id]
+                query_judgments = judgments[query.query_id]
+                if session.eval_mode == "ndcg":
+                    score = ndcg_at_10(ranked_doc_ids, query_judgments)
+                else:
+                    score = mrr_at_10(ranked_doc_ids, query_judgments)
+                query_metrics.append(
+                    QueryMetric(
+                        query_id=str(query.query_id),
+                        query_text=query.query_text,
+                        score=score,
+                    )
                 )
-            )
 
         metric_score = sum(metric.score for metric in query_metrics) / len(
             query_metrics
         )
-        self._eval_db.mark_task_complete(task.task_id, task.bearer_token)
+        with timed(self._timing_probe, "controller.complete.mark_complete"):
+            self._eval_db.mark_task_complete(task.task_id, task.bearer_token)
         return CompleteTaskResult(
             task_id=task.task_id,
             metric_name=session.eval_mode,
@@ -106,8 +119,7 @@ class EvalController:
             queries=query_metrics,
         )
 
-    @staticmethod
-    def _selected_queries(session: EvalSessionContext) -> list[StoredQuery]:
+    def _selected_queries(self, session: EvalSessionContext) -> list[StoredQuery]:
         query_by_identity = {query.identity: query for query in session.queries}
         query_splits = allocate_query_splits(
             [query.identity for query in session.queries],
@@ -115,6 +127,7 @@ class EvalController:
             seed=session.seed,
             sort_salt=session.sort_salt,
             proportions=session.split_proportions,
+            timing_probe=self._timing_probe,
         )
         selected_identities = query_splits[session.split_ordinal - 1]
         return [query_by_identity[identity] for identity in selected_identities]

@@ -208,3 +208,33 @@ def test_session_api_validates_request_and_health_endpoints(
 
     assert client.get("/healthz").json() == {"status": "ok"}
     assert client.get("/readyz").json() == {"status": "ok"}
+
+
+def test_openapi_is_an_agent_usable_workflow_guide(client: TestClient) -> None:
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    openapi = response.json()
+
+    description = openapi["info"]["description"]
+    assert "orchestrator" in description
+    assert "Authorization: Bearer <split_token>" in description
+    assert "single-use" in description
+
+    tags = {tag["name"]: tag["description"] for tag in openapi["tags"]}
+    assert "split tokens are ordered" in tags["sessions"]
+    assert "complete query list" in tags["tasks"]
+
+    session_operation = openapi["paths"]["/v1/sessions"]["post"]
+    assert session_operation["summary"] == "Create a session and its query splits"
+    session_model = openapi["components"]["schemas"]["CreateSessionRequest"]
+    assert session_model["examples"][0]["splits"] == [0.6, 0.2, 0.2]
+    assert "security" not in session_operation
+
+    task_operation = openapi["paths"]["/v1/tasks"]["post"]
+    assert task_operation["security"]
+    security_schemes = openapi["components"]["securitySchemes"]
+    assert "split token returned" in security_schemes["SplitBearerToken"]["description"]
+
+    completion_model = openapi["components"]["schemas"]["CompleteTaskRequest"]
+    assert completion_model["examples"][0]["results"][1]["rank"] == -1
+    assert "/healthz" in openapi["paths"]

@@ -26,7 +26,15 @@ from referee.session.controller import (
 )
 
 router = APIRouter()
-bearer_auth = HTTPBearer(auto_error=False)
+bearer_auth = HTTPBearer(
+    auto_error=False,
+    scheme_name="SplitBearerToken",
+    description=(
+        "Use the split token returned by `POST /v1/sessions`: "
+        "`Authorization: Bearer <split_token>`. It only grants access to the "
+        "split's tasks; it is not an overall user or API key."
+    ),
+)
 
 
 def _bearer_token(
@@ -52,6 +60,23 @@ def _bearer_token(
     response_model=CreateSessionResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["sessions"],
+    summary="Create a session and its query splits",
+    description=(
+        "Create one query pool and partition it using the ordered `splits` "
+        "proportions. Returns one bearer token per split in the same order. "
+        "This endpoint is unauthenticated in the current version. Save the "
+        "tokens; there is no session lookup endpoint to recover them. See the "
+        "example request for a typical orchestrator setup."
+    ),
+    responses={
+        422: {
+            "description": (
+                "Invalid fields, unknown dataset, or unavailable query count."
+            )
+        },
+        503: {"description": "Database unavailable or DATABASE_URL is not configured."},
+        500: {"description": "Unexpected database operation error."},
+    },
 )
 def create_session(
     request: CreateSessionRequest,
@@ -74,6 +99,25 @@ def create_session(
     response_model=CreateTaskResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["tasks"],
+    summary="Create a task and retrieve its queries",
+    description=(
+        "Send the assigned split token as a Bearer credential. The response "
+        "contains a new `task.id` and the complete query list for that split; "
+        "use those exact `query_id` values in the completion request. This "
+        "endpoint has no body. Each call creates a distinct task, even when "
+        "the same split token is reused."
+    ),
+    responses={
+        401: {"description": "Missing or invalid split bearer token."},
+        422: {
+            "description": (
+                "The split cannot produce a task (for example, it contains no "
+                "queries)."
+            )
+        },
+        503: {"description": "Database unavailable or DATABASE_URL is not configured."},
+        500: {"description": "Unexpected database operation error."},
+    },
 )
 def create_task(
     token: str = Depends(_bearer_token),
@@ -112,6 +156,29 @@ def _submitted_results(
     "/v1/tasks/{task_id}/complete",
     response_model=CompleteTaskResponse,
     tags=["tasks"],
+    summary="Submit ranked results and complete a task",
+    description=(
+        "Submit JSON results for every query in the task, using the same split "
+        "token that created it. Ranks must be contiguous from 1 for each "
+        'query; use exactly one `doc_id="-1"`, `rank=-1`, `score=-1` sentinel '
+        "row when there are no results. The `score` is required but does not "
+        "affect the metric. A valid submission completes the task once and "
+        "returns overall and per-query scores. Invalid results return 422 and "
+        "leave the task incomplete so they can be corrected."
+    ),
+    responses={
+        401: {"description": "Missing split bearer token."},
+        404: {"description": "Task does not exist or is not owned by this token."},
+        409: {"description": "Task has already been completed."},
+        422: {
+            "description": (
+                "Malformed or invalid result rows, or metric cannot be "
+                "calculated."
+            )
+        },
+        503: {"description": "Database unavailable."},
+        500: {"description": "Unexpected database operation error."},
+    },
 )
 def complete_task(
     task_id: str,

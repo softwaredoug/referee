@@ -5,7 +5,9 @@ description = "A referee service for search retrieval autoresearch tasks"
 readme = "README.md"
 requires-python = ">=3.15"
 dependencies = [
+    "fastapi>=0.115.0",
     "psycopg2-binary>=2.9.10",
+    "uvicorn>=0.34.0",
 ]
 
 [project.scripts]
@@ -18,6 +20,7 @@ load-judgments = "referee.cli.load_judgments:main"
 [dependency-groups]
 dev = [
     "flake8>=7.2.0",
+    "httpx2>=2.16.2",
     "pre-commit>=4.2.0",
     "pyright>=1.1.400",
     "pytest>=8.3.5",

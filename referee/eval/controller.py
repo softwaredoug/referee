@@ -5,6 +5,7 @@ import math
 import secrets
 
 from referee.eval.db import EvalDB
+from referee.eval.errors import TaskAlreadyCompleteError
 from referee.eval.metrics import mrr_at_10, ndcg_at_10
 from referee.eval.models import (
     CompleteTaskResult,
@@ -74,7 +75,7 @@ class EvalController:
         with timed(self._timing_probe, "controller.complete.load_task"):
             context = self._eval_db.get_task_context(task.task_id, task.bearer_token)
         if context.complete:
-            raise ValueError("Task is already complete")
+            raise TaskAlreadyCompleteError("Task is already complete")
 
         session = context.session
         if session.eval_mode not in ALLOWED_EVAL_MODES:

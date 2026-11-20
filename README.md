@@ -24,6 +24,41 @@ To reload the datasets after the schema is applied, run
 `uv run --group judgments-loader --env-file .env load-judgments`. See
 `docs/judgments.md` for details.
 
+## Run the API locally
+
+The API and PostgreSQL can run together through Docker Compose. After copying
+`.env.example` to `.env` and bootstrapping the local database, start the API:
+
+```sh
+docker compose up -d --build api
+```
+
+The API is available at `http://localhost:8080`; its OpenAPI page is at
+`http://localhost:8080/docs`. Compose configures the API container to connect to
+PostgreSQL using the internal `postgres` service name. The host-side `DATABASE_URL`
+in `.env` continues to use `localhost` for CLI commands and database setup.
+
+## Deploy to Fly
+
+The container expects an already-provisioned PostgreSQL database with the schema
+and judgment datasets loaded. Database initialization is not run by the API
+container; in particular, do not run the destructive local `make db-bootstrap`
+target against a production database.
+
+Set a unique Fly app name in `fly.toml`, create that app, configure
+`DATABASE_URL` as a Fly secret, then deploy:
+
+```sh
+fly apps create <unique-app-name>
+fly secrets set DATABASE_URL='postgresql://...'
+fly deploy
+```
+
+Fly routes traffic to port `8080` and checks `/readyz`, which reports ready only
+when PostgreSQL is reachable and the required schema tables exist. Session
+creation is unauthenticated in this initial API; task operations require their
+split bearer token.
+
 Run the configured quality checks with:
 
 ```sh

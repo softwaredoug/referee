@@ -126,6 +126,8 @@ and `score=-1`; it cannot also have result rows. Scores must be finite numbers.
 Submitted rank determines result order; `score` is required for input
 compatibility but is not used by NDCG or MRR. Metric definitions and additional
 evaluation details are in [Evaluating tasks](eval.md#receive-results-of-eval-task).
+Optional result-row fields such as `title`, `description`, or `image_url` are
+accepted and ignored, matching the CLI's optional CSV metadata columns.
 
 On success, return `200 OK`. The top-level metric name and each per-query metric
 key are the session's `eval_mode` (`ndcg` or `mrr`):
@@ -161,11 +163,12 @@ status mapping for the controller's existing validation outcomes:
 
 | Status | Use |
 |--------|-----|
-| `401 Unauthorized` | Missing or invalid bearer token. |
-| `404 Not Found` | Task ID is unknown or belongs to a different token; do not reveal which case applies. |
+| `401 Unauthorized` | Missing bearer token, or invalid token when creating a task. |
+| `404 Not Found` | Task ID is unknown or the token does not own it (including an invalid token); do not reveal which case applies. |
 | `409 Conflict` | Attempt to complete an already-completed task. |
 | `422 Unprocessable Entity` | Malformed JSON, invalid fields, unknown/unloaded dataset, unavailable query count, or invalid result rows / metric input. |
-| `500 Internal Server Error` | Unexpected server error. Database connection failures should be logged and returned without exposing connection details. |
+| `503 Service Unavailable` | Database connection failure or database schema not ready. |
+| `500 Internal Server Error` | Unexpected server or database operation error; do not expose connection details. |
 
 FastAPI request-model validation should reject malformed input before invoking
 the controller. Controller `ValueError`s should be translated to the
@@ -179,3 +182,12 @@ inspection UI. Judgment dataset loading is an administrative/bootstrap task
 covered by [Judgments](judgments.md#loading-script), not a public request route.
 The API routes above implement session creation and the eval task lifecycle;
 they do not change the underlying controllers' ownership or completion rules.
+
+## Running and deploying
+
+The FastAPI app is served by Uvicorn on port `8080`. For local Docker Compose
+usage, see the [README](../README.md#run-the-api-locally); for Fly deployment,
+see [Deploy to Fly](../README.md#deploy-to-fly).
+The `/healthz` liveness route does not require PostgreSQL. `/readyz` checks that
+PostgreSQL is reachable and the required schema tables exist; it does not load
+datasets or create the schema.

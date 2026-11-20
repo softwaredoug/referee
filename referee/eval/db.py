@@ -8,6 +8,11 @@ import psycopg2
 
 from referee.eval.models import EvalSessionContext, StoredQuery, TaskEvalContext
 from referee.eval.timing import TimingProbe, timed
+from referee.eval.errors import (
+    InvalidBearerTokenError,
+    TaskAlreadyCompleteError,
+    TaskNotFoundError,
+)
 
 
 class EvalDB:
@@ -42,7 +47,7 @@ class EvalDB:
                         )
                         split_row = cursor.fetchone()
                     if split_row is None:
-                        raise ValueError("Invalid bearer token")
+                        raise InvalidBearerTokenError("Invalid bearer token")
                     return self._load_session_context(cursor, split_row[0])
 
     def create_task(self, bearer_token: str, task_id: str) -> None:
@@ -65,7 +70,7 @@ class EvalDB:
                         )
                         task_row = cursor.fetchone()
                     if task_row is None:
-                        raise ValueError("Invalid bearer token")
+                        raise InvalidBearerTokenError("Invalid bearer token")
                     with timed(self._timing_probe, "db.create_task.touch_split"):
                         cursor.execute(
                             """
@@ -110,7 +115,7 @@ class EvalDB:
                         )
                         task_row = cursor.fetchone()
                     if task_row is None:
-                        raise ValueError(
+                        raise TaskNotFoundError(
                             "Task does not exist or does not belong to "
                             "this bearer token"
                         )
@@ -173,10 +178,7 @@ class EvalDB:
                         )
                         split_row = cursor.fetchone()
                     if split_row is None:
-                        raise ValueError(
-                            "Task is already complete or does not belong "
-                            "to this bearer token"
-                        )
+                        raise TaskAlreadyCompleteError("Task is already complete")
                     with timed(self._timing_probe, "db.complete_task.touch_split"):
                         cursor.execute(
                             """

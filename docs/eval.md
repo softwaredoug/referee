@@ -6,6 +6,10 @@ to access sets of queries.
 In this document, we'll discuss eval flows. It'll involve several distinct API / CLI calls, but
 all within one subsystem (ie controller + database module) called "eval".
 
+The REST API exposes the same task lifecycle as `POST /v1/tasks` and
+`POST /v1/tasks/{task_id}/complete`. For an end-to-end orchestrator and subagent
+example, see [the API consumer workflow](api.md#consumer-workflow-orchestrator-and-subagents).
+
 ## Start an eval task
 
 Starting an eval task assigns work to the caller, in the form of a set of queries for 

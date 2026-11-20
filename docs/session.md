@@ -93,8 +93,9 @@ The corresponding creation request is:
 }
 ```
 
-It returns the same `split_tokens` response as the CLI. A REST API is not yet
-implemented.
+The implemented `POST /v1/sessions` API returns the same `split_tokens`
+response as the CLI. See [the API consumer workflow](api.md#consumer-workflow-orchestrator-and-subagents)
+for how an orchestrator maps those tokens to subagents.
 
 ## Security scope
 

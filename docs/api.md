@@ -156,6 +156,146 @@ calculated. Invalid results (including an NDCG query with zero ideal DCG) leave
 the task incomplete so corrected results can be submitted. A completed task
 cannot be completed again.
 
+## Consumer workflow: orchestrator and subagents
+
+The orchestrator creates a session once, maps each returned split token to the
+subagent or run that should use it, and collects each subagent's completion
+response. A subagent creates a task for its assigned token, runs retrieval for
+all queries in that task, and submits the ranked results. The service allocates
+queries and computes metrics; the orchestrator decides what a split means and
+how to use the returned scores.
+
+### 1. The orchestrator creates the session
+
+Choose the dataset, metric, query-pool size, and proportions before delegating.
+For example, this creates three disjoint splits from a repeatably selected pool
+of 1,000 MS MARCO queries:
+
+```sh
+export API_BASE_URL="https://referee.example.com"
+
+curl --fail-with-body --silent --show-error \
+  -X POST "$API_BASE_URL/v1/sessions" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "dataset_name": "msmarco",
+    "eval_mode": "mrr",
+    "num_queries": 1000,
+    "seed": 42,
+    "splits": [0.6, 0.2, 0.2]
+  }'
+```
+
+The response contains `split_tokens` in request order. The orchestrator should
+keep the mapping between each token and its assigned subagent/run; the API does
+not return a session ID or expose an endpoint to recover lost tokens. For
+example, `split_tokens[0]` identifies the 60% split and the next two tokens
+identify the 20% splits. The server makes the query sets disjoint and the
+integer sizes sum to the selected pool size. Split ordinals are positional only:
+they do not imply training, validation, or holdout roles. Assign those roles
+yourself when delegating.
+
+### 2. The orchestrator delegates one token to each subagent
+
+Give each subagent the API base URL and only the split token for its assignment.
+The token is a bearer credential. The subagent starts its work by requesting a
+task:
+
+```sh
+export SPLIT_TOKEN="<token assigned to this subagent>"
+
+curl --fail-with-body --silent --show-error \
+  -X POST "$API_BASE_URL/v1/tasks" \
+  -H "Authorization: Bearer $SPLIT_TOKEN"
+```
+
+There is no request body. The response gives the `task.id`, `eval_mode`,
+`dataset_name`, and the complete query list for that split. The subagent should
+retain the task ID and use the exact `query_id` values from this response when
+submitting results. There is no pagination or separate query-fetch request.
+
+An orchestrator can use an assignment instruction like:
+
+> Work only on the queries returned for your assigned split token. Create one
+> task, run the assigned retrieval system for every query, and submit results
+> for every query to that task. Preserve each returned `query_id`. Return the
+> completion response, including the task ID and metric scores, to the
+> orchestrator.
+
+### 3. Each subagent runs retrieval and builds result rows
+
+For every query in the task, run the assigned retriever and produce one row per
+returned document. Ranks must start at `1` and be contiguous within each query;
+keep document IDs as strings. The `score` is required and must be finite, but
+the service orders results by rank and does not use the score to calculate MRR
+or NDCG. The metrics evaluate at depth 10. If retrieval returns no documents
+for a query, submit the single no-results sentinel row described above. Do not
+omit a query, even when it has no results.
+
+The request contains all rows together:
+
+```json
+{
+  "results": [
+    {"query_id": "<query id from task>", "doc_id": "doc-123", "rank": 1, "score": 12.4},
+    {"query_id": "<query id from task>", "doc_id": "doc-456", "rank": 2, "score": 10.8},
+    {"query_id": "<another query id>", "doc_id": "-1", "rank": -1, "score": -1}
+  ]
+}
+```
+
+### 4. Each subagent submits once and reports the response
+
+Submit the assembled rows with the same split token and the task ID returned
+when the task was created:
+
+```sh
+export TASK_ID="<task.id returned by POST /v1/tasks>"
+
+curl --fail-with-body --silent --show-error \
+  -X POST "$API_BASE_URL/v1/tasks/$TASK_ID/complete" \
+  -H "Authorization: Bearer $SPLIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary @results.json
+```
+
+The successful response includes an overall score and a score for each query,
+using the session metric name (`mrr` or `ndcg`). The subagent should save and
+return this response to the orchestrator. If submission returns `422`, correct
+the invalid or incomplete rows and resubmit them to the same task; the task
+remains incomplete until a valid completion succeeds.
+
+### 5. The orchestrator collects and interprets results
+
+Collect each task's completion response and associate it with the subagent,
+retrieval system, and split assignment. The API has no session-level aggregation
+or task-result lookup endpoint, so the orchestrator must retain the responses
+and perform any desired aggregation itself. Scores from different split tokens
+are computed over different, disjoint queries. For repeated runs on the same
+query set, the same split token can create multiple distinct tasks, each with
+its own task ID and completion response.
+
+For a direct comparison of multiple retrieval systems on identical queries,
+create a session with one split (`"splits": [1.0]`) and give that split token to
+each runner. Each runner creates a distinct task but receives the same query set.
+For partitioned work, give each runner a different token instead.
+
+### Retry and completion notes
+
+- Each `POST /v1/tasks` creates a new task, even when called repeatedly with the
+  same token. A retry after an ambiguous network timeout can therefore create
+  an extra task for the same queries.
+- Session creation also creates a new session on every request. If its response
+  is lost, the generated tokens from that session cannot be recovered; retrying
+  creates a different session with different tokens.
+- Completion is single-use. Preserve the `200` response: the API does not have
+  a route to fetch the saved metric response later. If the connection is lost
+  after submission, a retry may receive `409 Conflict` because the first
+  submission already completed the task.
+- Store split tokens and task IDs in the orchestrator's run state so work can be
+  correctly associated and resumed. Do not log tokens or give a subagent
+  credentials for other splits.
+
 ## HTTP errors
 
 Use a consistent JSON error body, for example `{"detail": "..."}`. Suggested

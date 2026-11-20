@@ -31,6 +31,18 @@ CREATE TABLE session_splits (
 
 CREATE INDEX session_splits_session_id_idx ON session_splits(session_id);
 
+CREATE TABLE tasks (
+    id BIGSERIAL PRIMARY KEY,
+    task_id TEXT NOT NULL UNIQUE,
+    session_split_id BIGINT NOT NULL
+        REFERENCES session_splits(session_split_id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_modified_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    complete BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX tasks_session_split_id_idx ON tasks(session_split_id);
+
 CREATE TABLE queries (
     query_id BIGSERIAL PRIMARY KEY,
     source_query_id TEXT NOT NULL,

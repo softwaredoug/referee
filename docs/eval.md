@@ -4,7 +4,7 @@ Refer to docs/session.md for context about how splits are created, and how they 
 to access sets of queries.
 
 In this document, we'll discuss eval flows. It'll involve several distinct API / CLI calls, but
-all within one subsystem (ie controller + database module) called "eval_task".
+all within one subsystem (ie controller + database module) called "eval".
 
 ## Start an eval task
 
@@ -183,3 +183,6 @@ With the following assumptions
 - ideal DCG computed from the judgments for a query, sorted by grade, descending,
   then DCG computed from the submitted results of the query sorted by rank ascending
 - NDCG is computed at a depth of 10, and MRR is computed at a depth of 10 as well.
+- NDCG uses the BEIR/pytrec_eval `ndcg_cut.10` convention: the relevance grade is
+  the gain, discounted by `log2(rank + 1)`; it does not use exponential gains.
+- A positive judgment grade is relevant for MRR.

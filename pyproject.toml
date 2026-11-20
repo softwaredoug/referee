@@ -10,6 +10,8 @@ dependencies = [
 
 [project.scripts]
 create-session = "referee.cli.create_session:main"
+create-task = "referee.cli.create_task:main"
+complete-task = "referee.cli.complete_task:main"
 load-judgments = "referee.cli.load_judgments:main"
 
 [dependency-groups]

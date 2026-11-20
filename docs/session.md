@@ -10,7 +10,7 @@ those tokens.
 The creator supplies:
 
 - `dataset_name`: the dataset to use.
-- `eval_mode`: the evaluation mode, currently `ndcg`.
+- `eval_mode`: the evaluation mode, either `ndcg` or `mrr`.
 - `num_queries`: the number of queries to select. If omitted, use all queries in
   the dataset.
 - `seed`: controls repeatable selection of the overall query pool. It defaults

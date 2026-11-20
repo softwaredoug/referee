@@ -7,7 +7,7 @@ from referee.session.allocation import normalize_split_proportions
 from referee.session.db import SessionDB
 
 ALLOWED_DATASETS = frozenset({"msmarco", "esci", "doug_blog"})
-ALLOWED_EVAL_MODES = frozenset({"ndcg"})
+ALLOWED_EVAL_MODES = frozenset({"ndcg", "mrr"})
 MIN_SEED = -(2**63)
 MAX_SEED = 2**63 - 1
 

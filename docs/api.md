@@ -156,6 +156,97 @@ calculated. Invalid results (including an NDCG query with zero ideal DCG) leave
 the task incomplete so corrected results can be submitted. A completed task
 cannot be completed again.
 
+### `POST /v1/tasks/{task_id}/debug` — inspect selected queries
+
+Use this endpoint to diagnose submitted retrieval results without completing or
+changing the task. It accepts incomplete result files and can inspect a task
+whether it is still open or already completed. The caller must use the same
+split bearer token that owns the task:
+
+```http
+Authorization: Bearer abc123
+Content-Type: application/json
+```
+
+The request identifies one or more queries from the task and supplies the
+result rows to inspect. Unlike completion, it does not require rows for every
+query in the task. Every requested query must be in the task's split and must
+have at least one row in `results`.
+
+```json
+{
+  "query_ids": ["q1", "q2"],
+  "results": [
+    {"query_id": "q1", "doc_id": "doc123", "rank": 1, "score": 0.9},
+    {"query_id": "q1", "doc_id": "doc456", "rank": 2, "score": 0.8},
+    {"query_id": "q2", "doc_id": "-1", "rank": -1, "score": -1}
+  ],
+  "include_target": true
+}
+```
+
+`include_target` is optional and defaults to `false`. When true, the response
+includes up to 10 judged documents for each query, ordered by relevance grade
+descending and then `doc_id` ascending. The target is the ideal judged result
+set; it is not part of the caller's submitted results. The endpoint does not
+compute an aggregate metric, validate completion requirements, or change task
+state. Unjudged submitted documents are returned with relevance grade `0`.
+
+The response is a `queries` object keyed by query ID. Each value contains the
+query ID and text, the submitted rows in rank order with relevance grades, and
+the optional target. If `include_target` is false, the `target` field is
+omitted.
+
+```json
+{
+  "queries": {
+    "q1": {
+      "query_id": "q1",
+      "query_text": "red sweater",
+      "results": [
+        {
+          "doc_id": "doc123",
+          "rank": 1,
+          "score": 0.9,
+          "relevance_grade": 4
+        },
+        {
+          "doc_id": "doc456",
+          "rank": 2,
+          "score": 0.8,
+          "relevance_grade": 0
+        }
+      ],
+      "target": [
+        {"doc_id": "doc123", "relevance_grade": 4},
+        {"doc_id": "doc789", "relevance_grade": 4}
+      ]
+    },
+    "q2": {
+      "query_id": "q2",
+      "query_text": "purple couch",
+      "results": [
+        {
+          "doc_id": "-1",
+          "rank": -1,
+          "score": -1,
+          "relevance_grade": 0
+        }
+      ],
+      "target": [
+        {"doc_id": "doc999", "relevance_grade": 3}
+      ]
+    }
+  }
+}
+```
+
+Errors use the standard `{"detail": "..."}` body. `401` means the bearer
+credential is missing; `404` means the task is unknown or does not belong to
+that token; `422` means the request is malformed, a query is outside the
+task's split, or a requested query has no result rows. Database failures use
+`503` or `500` as described in [HTTP errors](#http-errors).
+
 ## Consumer workflow: orchestrator and subagents
 
 The orchestrator creates a session once, maps each returned split token to the
@@ -244,6 +335,56 @@ The request contains all rows together:
 }
 ```
 
+### Debugging selected queries
+
+Use the debug endpoint to inspect a subset of a task's retrieval output against
+the service's judgments. Debugging uses the same task ID and split token from
+task creation, and it can be called at any point: before completion while
+investigating a run, after correcting results, or after the task has completed.
+It is read-only, so it does not consume the task or prevent a later completion.
+
+For example, save only the rows for the queries being investigated in
+`debug.json`:
+
+```json
+{
+  "query_ids": ["q1", "q2"],
+  "results": [
+    {"query_id": "q1", "doc_id": "doc123", "rank": 1, "score": 0.9},
+    {"query_id": "q1", "doc_id": "doc456", "rank": 2, "score": 0.8},
+    {"query_id": "q2", "doc_id": "-1", "rank": -1, "score": -1}
+  ],
+  "include_target": true
+}
+```
+
+Call the endpoint with the task ID returned by `POST /v1/tasks` and the same
+split token:
+
+```sh
+curl --fail-with-body --silent --show-error \
+  -X POST "$API_BASE_URL/v1/tasks/$TASK_ID/debug" \
+  -H "Authorization: Bearer $SPLIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary @debug.json
+```
+
+Set `include_target` to `true` to compare submitted results with the top 10
+judged documents for each query. Targets are ordered by grade descending and
+then `doc_id` ascending; they are judgments, not documents retrieved by the
+agent. Submitted rows are returned in rank order and annotated with their exact
+judgment grade; an unjudged document has grade `0`. Only requested query IDs
+are returned. Each requested ID must belong to the task and have at least one
+row in the request. You may send only the selected queries' rows—unrelated task
+queries are not required for debugging.
+
+The response helps pinpoint whether a miss is due to the retrieval ranking
+(compare `results` with `target`) or to a query/result mismatch. It does not
+calculate NDCG or MRR and does not enforce the complete-task requirement that
+every task query be represented. Use the normal completion endpoint only after
+assembling and validating the full result set. The endpoint contract above
+describes the response schema and error cases.
+
 ### 4. Each subagent submits once and reports the response
 
 Submit the assembled rows with the same split token and the task ID returned
@@ -320,8 +461,9 @@ database credentials, SQL, or other internal details in error responses.
 Session/task browsing and general CRUD endpoints are reserved for the future
 inspection UI. Judgment dataset loading is an administrative/bootstrap task
 covered by [Judgments](judgments.md#loading-script), not a public request route.
-The API routes above implement session creation and the eval task lifecycle;
-they do not change the underlying controllers' ownership or completion rules.
+The API routes above implement session creation, the eval task lifecycle, and
+read-only query debugging; they do not change the underlying controllers'
+ownership or completion rules.
 
 ## Running and deploying
 

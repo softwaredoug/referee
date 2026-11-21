@@ -33,7 +33,11 @@ are an orchestrator and one or more retrieval agents.
 3. The agent runs its retrieval system for every returned query, preserving
    each `query_id`, then calls `POST /v1/tasks/{task_id}/complete` with all
    ranked result rows and the same token.
-4. Save and return the successful completion response to the orchestrator. It
+4. If a query needs diagnosis, call
+   `POST /v1/tasks/{task_id}/debug` with selected query IDs and their result
+   rows. Debugging can happen before or after completion and can optionally
+   include the top judged target documents.
+5. Save and return the successful completion response to the orchestrator. It
    contains an overall score and per-query scores under the session metric key.
 
 Splits are disjoint partitions; their order has no built-in train, validation,
@@ -44,14 +48,16 @@ split token. The orchestrator, not this API, decides how to aggregate scores.
 ## Authentication and lifecycle
 
 There is no overall user/API-key authentication in this version, and session
-creation is unauthenticated. Task creation and completion require a split
+creation is unauthenticated. Task creation, completion, and debugging require a split
 bearer token. Treat tokens as secrets and do not give an agent tokens for other
 splits. A token may create multiple distinct tasks, each covering the same
 split. Completion is single-use. There are no session/task lookup or result
 recovery routes, so keep the create-session tokens, task IDs, and successful
-completion responses in the orchestrator's run state. POST requests are not
-idempotent; an ambiguous timeout followed by a retry may create another
-session/task or encounter an already-completed task.
+completion responses in the orchestrator's run state. Session/task creation
+and completion are not repeatable operations: retrying an ambiguous creation
+may create another session/task, and retrying completion may encounter an
+already-completed task. Debugging is read-only and may be repeated before or
+after completion, but it still requires the token that owns the task.
 
 ## Result requirements
 
@@ -65,8 +71,9 @@ return `422` and leave the task incomplete; a successful completion returns
 `200`, and a later completion attempt returns `409`.
 
 The detailed consumer guide is in the repository's `docs/api.md` under
-"Consumer workflow: orchestrator and subagents". Request examples and field
-rules are also shown on each operation below.
+"Consumer workflow: orchestrator and subagents", including a full query
+debugging example. Request examples and field rules are also shown on each
+operation below.
 """
 OPENAPI_TAGS = [
     {
@@ -80,7 +87,8 @@ OPENAPI_TAGS = [
         "name": "tasks",
         "description": (
             "Create a task for a split token, retrieve its complete query list, "
-            "then submit ranked results once to calculate the metric."
+            "inspect selected query results with judgments, then submit ranked "
+            "results once to calculate the metric."
         ),
     },
     {

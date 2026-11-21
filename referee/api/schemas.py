@@ -187,6 +187,97 @@ class CompleteTaskResponse(BaseModel):
     )
 
 
+class DebugQueriesRequest(RequestModel):
+    """Selected task queries and their submitted rows to inspect."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "query_ids": ["q1", "q2"],
+                    "results": [
+                        {
+                            "query_id": "q1",
+                            "doc_id": "doc-123",
+                            "rank": 1,
+                            "score": 12.4,
+                        },
+                        {
+                            "query_id": "q2",
+                            "doc_id": "-1",
+                            "rank": -1,
+                            "score": -1,
+                        },
+                    ],
+                    "include_target": True,
+                }
+            ]
+        },
+    )
+
+    query_ids: list[StrictStr] = Field(
+        min_length=1,
+        description=(
+            "One or more public query IDs from this task. The response contains "
+            "only these queries."
+        ),
+    )
+    results: list[SubmittedResultRequest] = Field(
+        description=(
+            "Submitted rows for the requested queries. Unlike completion, rows "
+            "for every task query are not required; each requested query must "
+            "have at least one row."
+        ),
+    )
+    include_target: bool = Field(
+        default=False,
+        description=(
+            "When true, include up to 10 judged target documents per query, "
+            "sorted by relevance grade descending and doc_id ascending."
+        ),
+    )
+
+
+class DebugResultResponse(BaseModel):
+    """One submitted result annotated with its relevance judgment."""
+
+    doc_id: str
+    rank: int
+    score: float
+    relevance_grade: int = Field(
+        description="Judgment grade; unjudged documents are assigned grade 0."
+    )
+
+
+class TargetResultResponse(BaseModel):
+    """One judged document from the query's ideal target list."""
+
+    doc_id: str
+    relevance_grade: int
+
+
+class DebugQueryResponse(BaseModel):
+    """Submitted results and optional target for one query."""
+
+    query_id: str
+    query_text: str
+    results: list[DebugResultResponse]
+    target: list[TargetResultResponse] | None = Field(
+        default=None,
+        description=(
+            "Present only when include_target=true. Up to 10 judged documents "
+            "ordered by relevance grade descending, then doc_id ascending."
+        ),
+    )
+
+
+class DebugQueriesResponse(BaseModel):
+    """Debug information keyed by the requested public query IDs."""
+
+    queries: dict[str, DebugQueryResponse]
+
+
 class HealthResponse(BaseModel):
     """Basic liveness/readiness response."""
 

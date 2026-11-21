@@ -9,15 +9,21 @@ from referee.api.schemas import (
     CompleteTaskResponse,
     CreateSessionRequest,
     CreateSessionResponse,
+    DebugQueriesRequest,
+    DebugQueriesResponse,
+    DebugQueryResponse,
+    DebugResultResponse,
     CreateTaskResponse,
     EvalQueryResponse,
     SubmittedResultRequest,
+    TargetResultResponse,
     TaskResponse,
 )
 from referee.eval.controller import EvalController
 from referee.eval.models import (
     CompleteTaskTask,
     CreateTaskTask,
+    DebugQueriesTask,
     SubmittedResult,
 )
 from referee.session.controller import (
@@ -204,4 +210,78 @@ def complete_task(
             }
             for query in result.queries
         ],
+    )
+
+
+@router.post(
+    "/v1/tasks/{task_id}/debug",
+    response_model=DebugQueriesResponse,
+    response_model_exclude_none=True,
+    tags=["tasks"],
+    summary="Inspect submitted results and judgments for selected queries",
+    description=(
+        "Debug one or more queries in a task using its owning split bearer "
+        "token. Provide the submitted rows for the requested query IDs; unlike "
+        "completion, other task queries are not required. Each result is "
+        "annotated with its judgment grade (unjudged documents have grade 0). "
+        "Set `include_target` to include each query's top 10 judged documents, "
+        "ordered by grade descending and doc_id ascending. This endpoint is "
+        "read-only and works before or after completion."
+    ),
+    responses={
+        401: {"description": "Missing split bearer token."},
+        404: {"description": "Task does not exist or is not owned by this token."},
+        422: {
+            "description": (
+                "Malformed request, a requested query is not in the task split, "
+                "or a requested query has no rows in results."
+            )
+        },
+        503: {"description": "Database unavailable."},
+        500: {"description": "Unexpected database operation error."},
+    },
+)
+def debug_task_queries(
+    task_id: str,
+    request: DebugQueriesRequest,
+    token: str = Depends(_bearer_token),
+    controller: EvalController = Depends(get_eval_controller),
+) -> DebugQueriesResponse:
+    result = controller.debug_queries(
+        DebugQueriesTask(
+            bearer_token=token,
+            task_id=task_id,
+            results=_submitted_results(request.results),
+            query_ids=request.query_ids,
+            include_target=request.include_target,
+        )
+    )
+    return DebugQueriesResponse(
+        queries={
+            query_id: DebugQueryResponse(
+                query_id=query.query_id,
+                query_text=query.query_text,
+                results=[
+                    DebugResultResponse(
+                        doc_id=row.doc_id,
+                        rank=row.rank,
+                        score=row.score,
+                        relevance_grade=row.relevance_grade,
+                    )
+                    for row in query.results
+                ],
+                target=(
+                    [
+                        TargetResultResponse(
+                            doc_id=row.doc_id,
+                            relevance_grade=row.relevance_grade,
+                        )
+                        for row in query.target
+                    ]
+                    if query.target is not None
+                    else None
+                ),
+            )
+            for query_id, query in result.queries.items()
+        }
     )

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from referee.api.app import create_app
+from referee.eval.db import EvalDB
 
 
 def _test_database_url() -> str:
@@ -188,9 +189,152 @@ def test_task_routes_require_bearer_and_hide_task_ownership(
             json={"results": []},
         )
         assert wrong_owner_response.status_code == 404
+        wrong_owner_debug_response = client.post(
+            f"/v1/tasks/{task_id}/debug",
+            headers={"Authorization": f"Bearer {second_token}"},
+            json={
+                "query_ids": ["1"],
+                "results": [
+                    {"query_id": "1", "doc_id": "doc-1", "rank": 1, "score": 1}
+                ],
+            },
+        )
+        assert wrong_owner_debug_response.status_code == 404
+        assert client.post(
+            f"/v1/tasks/{task_id}/debug",
+            json={"query_ids": ["1"], "results": []},
+        ).status_code == 401
     finally:
         for session_id in session_ids:
             _delete_session(database_url, session_id)
+
+
+def test_debug_queries_api_returns_partial_results_and_targets(
+    client: TestClient,
+) -> None:
+    database_url = _test_database_url()
+    session_response = client.post(
+        "/v1/sessions",
+        json={
+            "dataset_name": "doug_blog",
+            "eval_mode": "mrr",
+            "num_queries": 3,
+            "seed": 42,
+            "splits": [1.0],
+        },
+    )
+    assert session_response.status_code == 201
+    token = session_response.json()["split_tokens"][0]
+    session_id = _session_id(database_url, token)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        task_response = client.post("/v1/tasks", headers=headers)
+        assert task_response.status_code == 201
+        task = task_response.json()
+        task_id = task["task"]["id"]
+        query_ids = [query["query_id"] for query in task["queries"]]
+        judgments = EvalDB(database_url).get_judgments(
+            [int(query_id) for query_id in query_ids]
+        )
+
+        all_results: list[dict[str, object]] = []
+        for query_id in query_ids:
+            query_judgments = judgments[int(query_id)]
+            best_doc_id = min(
+                query_judgments,
+                key=lambda doc_id: (-query_judgments[doc_id], doc_id),
+            )
+            all_results.extend(
+                [
+                    {
+                        "query_id": query_id,
+                        "doc_id": best_doc_id,
+                        "rank": 1,
+                        "score": 0.9,
+                    },
+                    {
+                        "query_id": query_id,
+                        "doc_id": f"unjudged-{query_id}",
+                        "rank": 2,
+                        "score": 0.1,
+                    },
+                ]
+            )
+
+        requested_query_ids = query_ids[:2]
+        requested_results = [
+            row for row in all_results if row["query_id"] in requested_query_ids
+        ]
+        debug_response = client.post(
+            f"/v1/tasks/{task_id}/debug",
+            headers=headers,
+            json={
+                "query_ids": requested_query_ids,
+                "results": requested_results,
+                "include_target": True,
+            },
+        )
+        assert debug_response.status_code == 200
+        debug_body = debug_response.json()
+        assert list(debug_body["queries"]) == requested_query_ids
+        for query_id in requested_query_ids:
+            query_debug = debug_body["queries"][query_id]
+            query_judgments = judgments[int(query_id)]
+            assert query_debug["results"][0]["relevance_grade"] == query_judgments[
+                query_debug["results"][0]["doc_id"]
+            ]
+            assert query_debug["results"][1]["relevance_grade"] == 0
+            expected_target = sorted(
+                query_judgments.items(),
+                key=lambda judgment: (-judgment[1], judgment[0]),
+            )[:10]
+            assert [
+                (row["doc_id"], row["relevance_grade"])
+                for row in query_debug["target"]
+            ] == expected_target
+
+        missing_row_response = client.post(
+            f"/v1/tasks/{task_id}/debug",
+            headers=headers,
+            json={
+                "query_ids": [query_ids[0]],
+                "results": [
+                    row for row in all_results if row["query_id"] != query_ids[0]
+                ],
+            },
+        )
+        assert missing_row_response.status_code == 422
+        outside_split_response = client.post(
+            f"/v1/tasks/{task_id}/debug",
+            headers=headers,
+            json={
+                "query_ids": ["not-a-task-query"],
+                "results": [],
+            },
+        )
+        assert outside_split_response.status_code == 422
+
+        complete_response = client.post(
+            f"/v1/tasks/{task_id}/complete",
+            headers=headers,
+            json={"results": all_results},
+        )
+        assert complete_response.status_code == 200
+        debug_after_completion = client.post(
+            f"/v1/tasks/{task_id}/debug",
+            headers=headers,
+            json={
+                "query_ids": [query_ids[0]],
+                "results": [
+                    row for row in all_results if row["query_id"] == query_ids[0]
+                ],
+            },
+        )
+        assert debug_after_completion.status_code == 200
+        assert "target" not in debug_after_completion.json()["queries"][query_ids[0]]
+    finally:
+        _delete_session(database_url, session_id)
 
 
 def test_session_api_validates_request_and_health_endpoints(
@@ -219,6 +363,7 @@ def test_openapi_is_an_agent_usable_workflow_guide(client: TestClient) -> None:
     assert "orchestrator" in description
     assert "Authorization: Bearer <split_token>" in description
     assert "single-use" in description
+    assert "debug" in description.lower()
 
     tags = {tag["name"]: tag["description"] for tag in openapi["tags"]}
     assert "split tokens are ordered" in tags["sessions"]
@@ -237,4 +382,10 @@ def test_openapi_is_an_agent_usable_workflow_guide(client: TestClient) -> None:
 
     completion_model = openapi["components"]["schemas"]["CompleteTaskRequest"]
     assert completion_model["examples"][0]["results"][1]["rank"] == -1
+    debug_operation = openapi["paths"]["/v1/tasks/{task_id}/debug"]["post"]
+    assert debug_operation["security"]
+    assert "read-only" in debug_operation["description"]
+    debug_model = openapi["components"]["schemas"]["DebugQueriesRequest"]
+    assert debug_model["examples"][0]["include_target"] is True
+    assert debug_model["properties"]["query_ids"]["minItems"] == 1
     assert "/healthz" in openapi["paths"]

@@ -1,4 +1,7 @@
-.PHONY: db-bootstrap
+.PHONY: build db-bootstrap
+
+build:
+	docker compose build api
 
 db-bootstrap:
 	@test -f .env || { printf 'Missing .env; copy .env.example to .env first.\n' >&2; exit 1; }

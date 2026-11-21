@@ -14,6 +14,7 @@ dependencies = [
 create-session = "referee.cli.create_session:main"
 create-task = "referee.cli.create_task:main"
 complete-task = "referee.cli.complete_task:main"
+debug-queries = "referee.cli.debug_queries:main"
 benchmark-esci-eval = "referee.eval.benchmark:main"
 load-judgments = "referee.cli.load_judgments:main"
 

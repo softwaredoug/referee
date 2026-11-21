@@ -116,3 +116,49 @@ class CompleteTaskResult:
     metric_name: str
     metric_score: float
     queries: list[QueryMetric]
+
+
+@dataclass(frozen=True)
+class DebugQueriesTask:
+    """Structured input for inspecting submitted results for selected queries."""
+
+    bearer_token: str
+    task_id: str
+    results: list[SubmittedResult]
+    query_ids: list[str]
+    include_target: bool = False
+
+
+@dataclass(frozen=True)
+class DebugResultRow:
+    """One submitted result annotated with its judgment grade."""
+
+    doc_id: str
+    rank: int
+    score: float
+    relevance_grade: int
+
+
+@dataclass(frozen=True)
+class TargetResult:
+    """One judged document in the ideal top-results list."""
+
+    doc_id: str
+    relevance_grade: int
+
+
+@dataclass(frozen=True)
+class DebugQueryResult:
+    """Debug information for one query."""
+
+    query_id: str
+    query_text: str
+    results: list[DebugResultRow]
+    target: list[TargetResult] | None = None
+
+
+@dataclass(frozen=True)
+class DebugQueriesResult:
+    """Debug information for the requested queries."""
+
+    queries: dict[str, DebugQueryResult]

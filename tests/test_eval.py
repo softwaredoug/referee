@@ -11,12 +11,15 @@ import pytest
 from referee.cli.complete_task import main as complete_task_main
 from referee.cli.complete_task import read_results_csv
 from referee.cli.create_task import main as create_task_main
+from referee.cli.debug_queries import main as debug_queries_main
 from referee.eval.controller import EvalController
 from referee.eval.db import EvalDB
 from referee.eval.metrics import mrr_at_10, ndcg_at_10
 from referee.eval.models import (
     CompleteTaskTask,
     CreateTaskTask,
+    DebugQueriesTask,
+    DebugResultRow,
     StoredQuery,
     SubmittedResult,
 )
@@ -193,9 +196,134 @@ def test_task_cannot_be_completed_using_another_splits_token() -> None:
                     results=[],
                 )
             )
+        with pytest.raises(ValueError, match="does not belong"):
+            controller.debug_queries(
+                DebugQueriesTask(
+                    bearer_token=other_tokens[0],
+                    task_id=task.task.id,
+                    results=[],
+                    query_ids=["1"],
+                )
+            )
     finally:
         _delete_session(database_url, session_id)
         _delete_session(database_url, other_session_id)
+
+
+def test_debug_queries_returns_results_and_optional_targets() -> None:
+    database_url = _database_url()
+    split_tokens, session_id = _create_session(database_url)
+    controller = EvalController(EvalDB(database_url))
+    eval_db = EvalDB(database_url)
+
+    try:
+        created = controller.create_task(CreateTaskTask(split_tokens[0]))
+        query_ids = [query.query_id for query in created.queries]
+        judgments = eval_db.get_judgments([int(query_id) for query_id in query_ids])
+        all_results: list[SubmittedResult] = []
+        for query_id in query_ids:
+            query_judgments = judgments[int(query_id)]
+            best_doc_id = min(
+                query_judgments,
+                key=lambda doc_id: (-query_judgments[doc_id], doc_id),
+            )
+            all_results.append(
+                SubmittedResult(
+                    query_id=query_id,
+                    doc_id=best_doc_id,
+                    rank=1,
+                    score=0.9,
+                )
+            )
+            all_results.append(
+                SubmittedResult(
+                    query_id=query_id,
+                    doc_id=f"unjudged-{query_id}",
+                    rank=2,
+                    score=0.1,
+                )
+            )
+
+        # Debug only inspects the requested queries; task completion still
+        # validates and evaluates results for the entire task.
+        controller.complete_task(
+            CompleteTaskTask(
+                bearer_token=split_tokens[0],
+                task_id=created.task.id,
+                results=all_results,
+            )
+        )
+
+        selected_query_ids = query_ids[:2]
+        debug_result = controller.debug_queries(
+            DebugQueriesTask(
+                bearer_token=split_tokens[0],
+                task_id=created.task.id,
+                results=all_results,
+                query_ids=selected_query_ids,
+                include_target=True,
+            )
+        )
+
+        assert list(debug_result.queries) == selected_query_ids
+        for query_id in selected_query_ids:
+            query_result = debug_result.queries[query_id]
+            query_judgments = judgments[int(query_id)]
+            assert query_result.query_id == query_id
+            assert query_result.query_text == next(
+                query.query_text
+                for query in created.queries
+                if query.query_id == query_id
+            )
+            best_doc_id = all_results[query_ids.index(query_id) * 2].doc_id
+            assert query_result.results == [
+                DebugResultRow(
+                    doc_id=best_doc_id,
+                    rank=1,
+                    score=0.9,
+                    relevance_grade=query_judgments[best_doc_id],
+                ),
+                DebugResultRow(
+                    doc_id=f"unjudged-{query_id}",
+                    rank=2,
+                    score=0.1,
+                    relevance_grade=0,
+                ),
+            ]
+            expected_target = sorted(
+                query_judgments.items(),
+                key=lambda judgment: (-judgment[1], judgment[0]),
+            )[:10]
+            assert query_result.target is not None
+            assert [
+                (target.doc_id, target.relevance_grade)
+                for target in query_result.target
+            ] == expected_target
+
+        with pytest.raises(ValueError, match="not present in results CSV"):
+            controller.debug_queries(
+                DebugQueriesTask(
+                    bearer_token=split_tokens[0],
+                    task_id=created.task.id,
+                    results=[
+                        result
+                        for result in all_results
+                        if result.query_id != query_ids[0]
+                    ],
+                    query_ids=[query_ids[0]],
+                )
+            )
+        with pytest.raises(ValueError, match="not part of this task"):
+            controller.debug_queries(
+                DebugQueriesTask(
+                    bearer_token=split_tokens[0],
+                    task_id=created.task.id,
+                    results=all_results,
+                    query_ids=["not-a-task-query"],
+                )
+            )
+    finally:
+        _delete_session(database_url, session_id)
 
 
 def test_ndcg_uses_linear_grade_gain_and_log_discount() -> None:
@@ -269,3 +397,12 @@ def test_create_task_cli_requires_arguments(monkeypatch: pytest.MonkeyPatch) -> 
 
     with pytest.raises(SystemExit):
         create_task_main()
+
+
+def test_debug_queries_cli_requires_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["debug-queries"])
+
+    with pytest.raises(SystemExit):
+        debug_queries_main()

@@ -12,11 +12,16 @@ from referee.eval.models import (
     CompleteTaskTask,
     CreateTaskResult,
     CreateTaskTask,
+    DebugQueriesResult,
+    DebugQueriesTask,
+    DebugQueryResult,
+    DebugResultRow,
     EvalQuery,
     EvalSessionContext,
     QueryMetric,
     StoredQuery,
     SubmittedResult,
+    TargetResult,
     TaskDescriptor,
 )
 from referee.eval.timing import TimingProbe, timed
@@ -119,6 +124,84 @@ class EvalController:
             metric_score=metric_score,
             queries=query_metrics,
         )
+
+    def debug_queries(self, task: DebugQueriesTask) -> DebugQueriesResult:
+        """Return submitted results and judgments for selected task queries."""
+        if not task.bearer_token:
+            raise ValueError("bearer_token must not be empty")
+        if not task.task_id:
+            raise ValueError("task_id must not be empty")
+        if not task.query_ids:
+            raise ValueError("At least one query_id must be provided")
+        if len(task.query_ids) != len(set(task.query_ids)):
+            raise ValueError("query_ids must be unique")
+
+        with timed(self._timing_probe, "controller.debug.load_task"):
+            context = self._eval_db.get_task_context(task.task_id, task.bearer_token)
+
+        with timed(self._timing_probe, "controller.debug.allocate_queries"):
+            selected_queries = self._selected_queries(context.session)
+        query_by_public_id = {
+            str(query.query_id): query for query in selected_queries
+        }
+
+        requested_queries: list[StoredQuery] = []
+        for query_id in task.query_ids:
+            query = query_by_public_id.get(query_id)
+            if query is None:
+                raise ValueError(f"query_id is not part of this task: {query_id}")
+            requested_queries.append(query)
+
+        requested_ids = set(task.query_ids)
+        grouped_results: dict[str, list[SubmittedResult]] = {
+            query_id: [] for query_id in task.query_ids
+        }
+        for result in task.results:
+            if result.query_id in requested_ids:
+                grouped_results[result.query_id].append(result)
+        for query_id, query_results in grouped_results.items():
+            if not query_results:
+                raise ValueError(
+                    f"query_id is not present in results CSV: {query_id}"
+                )
+
+        with timed(self._timing_probe, "controller.debug.load_judgments"):
+            judgments = self._eval_db.get_judgments(
+                [query.query_id for query in requested_queries]
+            )
+
+        debug_queries: dict[str, DebugQueryResult] = {}
+        for query in requested_queries:
+            query_id = str(query.query_id)
+            query_judgments = judgments[query.query_id]
+            ordered_results = sorted(
+                grouped_results[query_id], key=lambda result: result.rank
+            )
+            target = None
+            if task.include_target:
+                target = [
+                    TargetResult(doc_id=doc_id, relevance_grade=grade)
+                    for doc_id, grade in sorted(
+                        query_judgments.items(),
+                        key=lambda judgment: (-judgment[1], judgment[0]),
+                    )[:10]
+                ]
+            debug_queries[query_id] = DebugQueryResult(
+                query_id=query_id,
+                query_text=query.query_text,
+                results=[
+                    DebugResultRow(
+                        doc_id=result.doc_id,
+                        rank=result.rank,
+                        score=result.score,
+                        relevance_grade=query_judgments.get(result.doc_id, 0),
+                    )
+                    for result in ordered_results
+                ],
+                target=target,
+            )
+
+        return DebugQueriesResult(queries=debug_queries)
 
     def _selected_queries(self, session: EvalSessionContext) -> list[StoredQuery]:
         query_by_identity = {query.identity: query for query in session.queries}

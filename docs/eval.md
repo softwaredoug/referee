@@ -174,6 +174,97 @@ or the selected metric cannot be computed, completion returns a failure and the
 task remains incomplete so the caller can submit a corrected CSV. A completed
 task cannot be completed again.
 
+## Debug task
+
+The `debug-queries` command shows the submitted results and relevance grades for
+one or more queries in a task. It works before or after task completion. The
+correct bearer token for the task is required to prevent data leakage.
+
+```sh
+uv run debug-queries \
+  --bearer_token abc123 \
+  --task_id abcd1234 \
+  --results results.csv \
+  --query q1
+```
+
+The response is a JSON object keyed by query ID. Unjudged documents have
+`relevance_grade` 0. A requested query must belong to the task's split and have
+at least one row in the results CSV.
+
+```json
+{
+  "queries": {
+    "q1": {
+      "query_id": "q1",
+      "query_text": "red sweater",
+      "results": [
+        {
+          "doc_id": "doc123",
+          "rank": 1,
+          "score": 0.9,
+          "relevance_grade": 1
+        },
+        {
+          "doc_id": "doc456",
+          "rank": 2,
+          "score": 0.8,
+          "relevance_grade": 0
+        }
+      ]
+    }
+  }
+}
+```
+
+Pass multiple query IDs to inspect more than one query. The response includes
+only those queries; it does not calculate an aggregate metric.
+
+```sh
+uv run debug-queries \
+  --bearer_token abc123 \
+  --task_id abcd1234 \
+  --results results.csv \
+  --query q1 q2
+```
+
+Add `--target` to include the ideal target for each query. For judgment-based
+evaluation modes, this is up to 10 judged documents, sorted by relevance grade
+descending and then by `doc_id` ascending.
+
+```sh
+uv run debug-queries \
+  --bearer_token abc123 \
+  --task_id abcd1234 \
+  --results results.csv \
+  --query q1 \
+  --target
+```
+
+With `--target`, each query also contains a `target` list:
+
+```json
+{
+  "queries": {
+    "q1": {
+      "query_id": "q1",
+      "query_text": "red sweater",
+      "results": [
+        {
+          "doc_id": "doc123",
+          "rank": 1,
+          "score": 0.9,
+          "relevance_grade": 4
+        }
+      ],
+      "target": [
+        {"doc_id": "doc123", "relevance_grade": 4},
+        {"doc_id": "doc789", "relevance_grade": 4}
+      ]
+    }
+  }
+}
+```
 
 ## Eval modes
 

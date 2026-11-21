@@ -4,7 +4,7 @@ This repo creates a service that acts like a referee for search retrieval autore
 
 ## Coding practices
 
-This is a python project using uv, flake8, pyright. We should install post-commit hook and 
+This is a python project using uv, flake8, pyright. We should install pre-commit hook and 
 fix any issues that arise from these tools during a commit.
 
 Use python available via asdf in 3.15.2
@@ -61,6 +61,9 @@ referee/session/controller.py
 A postgres database is used to store the state of the system. Such as session keys (see docs)
 The docs may describe tables associated with those subsystems.
 
+Migrations should exist in a database/ folder, as a .sql folder. For now, no migrations are nedeed
+and we should just expect to wipe and recreate the database as needed. 
+
 ## Types of tests
 
 Unit tests should be used liberally, at your discretion, to test individual classes or 
@@ -83,16 +86,13 @@ The general usage flow goes like
 
 See docs/session.md
 
+Define the parameters of a query set within a dataset, and also
+splits. Receive a bearer token for each  split. The orchestrator
+will delegate tokens to the caller.
 
-### Access eval tasks
+### Run eval tasks
 
-Given a key, access the eval tasks (ie list of queries) to run with a task_id
-(NOT YET IMPLEMENTED)
+See docs/eval.md
 
-
-### Submit task results
-
-The client submits the results of a task (identified via task_id) and for evaluation
-
-If given a holdout key, the results are evaluated and a score is returned.
-If given a training key, the result of every query in the set is returned.
+Given a bearer token, access the eval tasks (ie list of queries) to run. Get 
+a task_id. The client then submits results back to the service for evaluation.

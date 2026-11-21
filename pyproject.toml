@@ -27,7 +27,7 @@ dev = [
     "pytest>=8.3.5",
 ]
 judgments-loader = [
-    "cheat-at-search @ git+https://github.com/softwaredoug/cheat-at-search.git@f1ff0cc06cc0ecd0feff2da7a1bf087daf3faede",
+    "cheat-at-search @ git+https://github.com/softwaredoug/cheat-at-search.git@b14065b7174f61acecec6117bf8bf64a4abfa5b8",
 ]
 
 [build-system]
